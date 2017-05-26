@@ -6,64 +6,104 @@ module Main where
 
 import Network.Socket
 import Network.Socket.ByteString as NSB
+import Network.Teleshell
 import Data.Monoid
+import Pipes
+import Pipes.Core
+import Data.ByteString (ByteString)
+import qualified Pipes.Prelude as PP
 import qualified Data.ByteString.Lazy as LB
+import qualified Data.ByteString.Lazy.Char8 as LBC
 import qualified Data.ByteString.Char8 as BC
 
+remoteHost :: String
+remoteHost = "10.109.74.139"
+
 main :: IO ()
-main = putStrLn "done"
+main = withSocketsDo $ do       
+  addrinfos <- getAddrInfo Nothing (Just remoteHost) (Just "23")       
+  let serveraddr = head addrinfos       
+  sock <- socket (addrFamily serveraddr) Stream defaultProtocol       
+  connect sock (addrAddress serveraddr)       
+  putStrLn "Connected"       
+  e <- runSocketPipeEither sock $
+    (teleshell >\\ (chainPull (lift . displaySent) (lift . displayReceived) +>> client))
+    --     PP.chain (lift . displayTraffic "out")
+    -- >-> (teleshell >\\ client)
+    -- >-> PP.chain (lift . displayTraffic "in")
+  case e of
+    Right () -> putStrLn "Succeeded"
+    Left err -> print err
 
--- remoteHost :: String
--- remoteHost = "10.110.7.73"
--- 
--- main :: IO ()
--- main = withSocketsDo $ do       
---   args <- getArgs      
---   addrinfos <- getAddrInfo Nothing (Just remoteHost) (Just "23")       
---   let serveraddr = head addrinfos       
---   sock <- socket (addrFamily serveraddr) Stream defaultProtocol       
---   connect sock (addrAddress serveraddr)       
---   putStrLn "Connected"       
---   h <- socketToHandle sock ReadWriteMode       
---   hSetBuffering h (BlockBuffering Nothing)       
---   handshakeAndLogin h $ Credential (args !! 1, args !! 2)       
---   hPutStrLn h (args !! 3)       
---   hFlush h       
---   putStrLn "Command sent"       
---   threadDelay 1000000 
--- 
--- loop :: Socket -> IO ()
--- loop s = do
---   str <- getLine
---   NSB.sendAll s (BC.pack str)
---   NSB.recv 4096
-
-teleshell :: String -> Word16 -> ByteString -> Server ByteString Builder IO ()
-teleshell host port bs0 = do
-  sock <- lift initialize
-  teleshellConnected sock
-
-teleshellConnected :: Socket -> ByteString -> Server ByteString Builder IO ()
-teleshellConnected sock = go
+chainPull :: Monad m => (a' -> m ()) -> (a -> m ()) -> a' -> Proxy a' a a' a m r
+chainPull f g = go
   where
-  go :: ByteString -> Server ByteString Builder IO ()
-  go bs = do
-    (bb,leftovers) <- lift (runEffect (socketToProducer sock >-> consumeBreakSubstring))
-    if B.null leftovers
-      then respond bb >>= go
-      else lift (fail "teleshell: there should not be any leftovers")
+  go a' = do
+    lift (f a')
+    a <- request a'
+    lift (g a)
+    respond a >>= go
 
-socketToProducer
-  :: Socket
-  -> Int
-  -> Producer' B.ByteString IO ()
-socketToProducer sock nbytes = loop
-  where
-  loop = do
-    bs <- liftIO (NSB.recv sock nbytes)
-    if B.null bs
-      then return ()
-      else yield bs >> loop
+displaySent :: Exchange -> IO ()
+displaySent (Exchange cmd prompt) = do
+  BC.putStr $ "Sent (Expecting prompt [" <> prompt <> "]): "
+  case cmd of
+    CommandEmpty -> BC.putStrLn "no command sent"
+    CommandLine c -> BC.putStrLn c
+    CommandHidden c -> BC.putStrLn c
+
+displayReceived :: LB.ByteString -> IO ()
+displayReceived bs = do
+  putStrLn "Received"
+  putStrLn "========="
+  LBC.putStrLn bs
+  putStrLn "========="
+
+displayTraffic :: String -> ByteString -> IO ()
+displayTraffic name bs = do
+  putStrLn name
+  putStrLn "========="
+  BC.putStrLn bs
+  putStrLn "========="
+
+client :: Monad m => Client' Exchange LB.ByteString m ()
+client = do
+  _ <- request (Exchange CommandEmpty "Login: ")
+  _ <- request (Exchange (CommandLine "notrealusername") "Password: ")
+  _ <- request (Exchange (CommandHidden "notrealpassword") "ZNID42xx-Router> ")
+  _ <- request (Exchange (CommandLine "enable") "ZNID42xx-Router# ")
+  _ <- request (Exchange (CommandLine "show system info") "ZNID42xx-Router# ")
+  _ <- request (Exchange (CommandLine "show vlan all") "ZNID42xx-Router# ")
+  _ <- request (Exchange (CommandLine "show interface rate-limit all") "ZNID42xx-Router# ")
+  return ()
+
+
+-- teleshell :: String -> Word16 -> ByteString -> Server ByteString Builder IO ()
+-- teleshell host port bs0 = do
+--   sock <- lift initialize
+--   teleshellConnected sock
+-- 
+-- teleshellConnected :: Socket -> ByteString -> Server ByteString Builder IO ()
+-- teleshellConnected sock = go
+--   where
+--   go :: ByteString -> Server ByteString Builder IO ()
+--   go bs = do
+--     (bb,leftovers) <- lift (runEffect (socketToProducer sock >-> consumeBreakSubstring))
+--     if B.null leftovers
+--       then respond bb >>= go
+--       else lift (fail "teleshell: there should not be any leftovers")
+-- 
+-- socketToProducer
+--   :: Socket
+--   -> Int
+--   -> Producer' B.ByteString IO ()
+-- socketToProducer sock nbytes = loop
+--   where
+--   loop = do
+--     bs <- liftIO (NSB.recv sock nbytes)
+--     if B.null bs
+--       then return ()
+--       else yield bs >> loop
     
 
 -- -- | The second element in the tuple returned in any additional

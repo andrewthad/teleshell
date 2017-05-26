@@ -1,0 +1,10 @@
+System Info
+
+Model Number                   ZNID-GE-4226-EL-CDE
+Serial Number                  11262880
+Registration ID                0000000000
+FSAN Number                    ZNTS00000000
+Bootloader Version             1.0.38-114.185 (3.1.294)
+Firmware Version               S3.1.294
+Firmware Version Timestamp     170317_1731
+Alternate Firmware Version     S3.1.282

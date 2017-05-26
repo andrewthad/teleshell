@@ -14,6 +14,11 @@ import Data.Functor.Identity
 import Control.Monad
 import Pipes
 import Data.List.Split (chunksOf)
+import Network.Zhone
+import Data.Vector (Vector)
+import Data.Vector.Mutable (MVector)
+import qualified Data.Vector as V
+import qualified Data.Vector.Mutable as MV
 
 import qualified Data.ByteString.Lazy as LB
 import qualified Data.ByteString as B
@@ -21,7 +26,7 @@ import qualified Data.ByteString.Builder as BB
 import qualified Pipes.Prelude as PP
 
 import Data.ByteString.Substring (breakSubstringLazy)
-import Pipes.ByteString.Substring (consumeBreakSubstring)
+import Pipes.ByteString.Substring (consumeBreakSubstring,consumeDropExactLeftovers)
 
 main :: IO ()
 main = defaultMain tests
@@ -30,7 +35,11 @@ traceShowId :: a -> a
 traceShowId = id
 
 tests :: TestTree
-tests = testGroup "Tests" [properties,unitTests]
+tests = testGroup "Tests"
+  [ properties
+  , substringUnitTests
+  , parserUnitTests
+  ]
 
 properties :: TestTree
 properties = testGroup "Properties" [qcProps]
@@ -68,7 +77,8 @@ qcProps = testGroup "(checked by QuickCheck)"
       return (checkConsumer chunkSize pat b == Right (B.breakSubstring pat b))
   ]
 
-unitTests = testGroup "Unit tests"
+substringUnitTests :: TestTree
+substringUnitTests = testGroup "Substring Unit Tests"
   [ testCase "A" $ breakSubstringLazy "" "thedrewlives" @?= ("","thedrewlives")
   , testCase "B" $ breakSubstringLazy "drew" "thedrewlives" @?= ("the","drewlives")
   , testCase "C" $ breakSubstringLazy "drew" "thelivesofcatsarewhatdrewstudiesonfriday" @?= ("thelivesofcatsarewhat","drewstudiesonfriday")
@@ -80,7 +90,67 @@ unitTests = testGroup "Unit tests"
   , testCase "I" $ checkConsumer 3 "drew" "thetopdrewperson" @?= Right ("thetop","drewperson")
   , testCase "J" $ checkConsumer 4 "ronnie" "thepersonnamedronnieisthebest" @?= Right ("thepersonnamed","ronnieisthebest")
   , testCase "K" $ checkConsumer 5 "" "the" @?= Right ("","the")
+  , testCase "L" $ checkDropExactLeftovers 1 "theman" "themanistheplan" @?= Right "istheplan"
+  , testCase "M" $ checkDropExactLeftovers 3 "" "coolkidsgofirst" @?= Right "coolkidsgofirst"
   ]
+
+parserUnitTests :: TestTree
+parserUnitTests = testGroup "Parser Unit Tests"
+  [ testCase "System Info" $ testDecode "sample/zhone_system_info.txt" decodeSystemInfo expectedSystemInfo
+  , testCase "VLAN Table" $ testDecode "sample/zhone_vlan.txt" decodeVlans expectedVlans
+  , testCase "Port Rate Limit" $ testDecode "sample/zhone_port_rate_limit.txt" decodeRateLimits expectedRateLimits
+  ]
+
+testDecode :: (Eq a, Show a) => String -> (LB.ByteString -> Maybe a) -> a -> IO ()
+testDecode filename decode expected = do
+  bs <- B.readFile filename
+  let lbs = LB.fromStrict bs
+  decode lbs @?= Just expected
+
+expectedVlans :: Vector Vlan
+expectedVlans = V.fromList
+  [ Vlan 127 "CDE_Mgmt_Vlan" "Bridged" "Disable" (makeAvailability [])
+  , Vlan 150 "Meter" "Bridged" "Disable" (makeAvailability [6])
+  , Vlan 200 "Video" "Bridged" "Disable" (makeAvailability [2,4,5])
+  , Vlan 300 "Internet" "Bridged" "Disable" (makeAvailability [])
+  , Vlan 305 "internet305" "Bridged" "Disable" (makeAvailability [1])
+  , Vlan 555 "Phone IBBS" "Bridged" "Disable" (makeAvailability [])
+  ]
+
+expectedRateLimits :: Vector RateLimit
+expectedRateLimits = V.fromList
+  [ RateLimit "eth0" "Fiber WAN" "Disable" 0 0 500
+  , RateLimit "eth1" "LAN 1 - GigE" "Disable" 0 0 500
+  , RateLimit "eth2" "LAN 2 - GigE" "Disable" 0 0 500
+  , RateLimit "eth3" "LAN 3 - GigE" "Disable" 0 0 500
+  , RateLimit "eth4" "LAN 4 - GigE" "Disable" 0 0 500
+  , RateLimit "eth5" "LAN 5 - GigE" "Disable" 0 0 500
+  , RateLimit "eth6" "LAN 6 - GigE" "Disable" 0 0 500
+  ]
+
+makeAvailability :: [Int] -> Vector (Maybe Taggedness)
+makeAvailability xs = V.create $ do
+  mv <- MV.replicate 7 Nothing
+  MV.write mv 0 (Just Tagged)
+  forM_ xs $ \ix -> do
+    MV.write mv ix (Just Untagged)
+  return mv
+
+expectedSystemInfo :: SystemInfo
+expectedSystemInfo = SystemInfo
+  "ZNID-GE-4226-EL-CDE"
+  11262880
+  0
+  "ZNTS00000000"
+  ( BootloaderVersion
+    ( VersionCons 1 $ VersionCons 0 $ VersionCons 38 $ VersionNil )
+    ( VersionCons 114 $ VersionCons 185 $ VersionNil )
+    ( VersionCons 3 $ VersionCons 1 $ VersionCons 294 $ VersionNil )
+  )
+  (VersionCons 3 $ VersionCons 1 $ VersionCons 294 $ VersionNil)
+  (Timestamp 17 03 17 17 31)
+  (VersionCons 3 $ VersionCons 1 $ VersionCons 282 $ VersionNil)
+
 
 checkConsumer :: Int -> ByteString -> ByteString -> Either [Atom] (ByteString,ByteString)
 checkConsumer chunkSize needle haystack =
@@ -92,6 +162,17 @@ checkConsumer chunkSize needle haystack =
       Just bss -> Right (bs, B.concat bss)
       Nothing -> Left results
     _ -> Left results
+
+checkDropExactLeftovers :: Int -> ByteString -> ByteString -> Either (Either [Atom] (Int,ByteString)) ByteString
+checkDropExactLeftovers chunkSize preface haystack =
+  let chunks :: Producer ByteString Identity ()
+      chunks = mapM_ (yield . B.pack) (chunksOf chunkSize (B.unpack haystack))
+      (atoms,m) = runIdentity (PP.toListM' ((chunks >> return Nothing)  >-> pipeDropExact preface))
+  in case m of
+    Just pair -> Left (Right pair)
+    Nothing -> case flattenAfters atoms of
+      Just bss -> Right (B.concat bss)
+      Nothing -> Left (Left atoms)
 
 data Atom = AtomBefore ByteString | AtomAfter ByteString
   deriving (Show,Eq)
@@ -113,4 +194,15 @@ pipeBreakSubstring pat = do
         yield (AtomAfter a)
   forever go
 
+pipeDropExact :: Monad m => ByteString -> Pipe ByteString Atom m (Maybe (Int,ByteString))
+pipeDropExact preface = do
+  e <- consumeDropExactLeftovers B.empty preface 
+  case e of
+    Left pair -> return (Just pair)
+    Right leftovers -> do
+      yield (AtomAfter leftovers)
+      let go = do
+            a <- await
+            yield (AtomAfter a)
+      forever go
 
