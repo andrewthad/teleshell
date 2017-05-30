@@ -27,9 +27,12 @@ import qualified Pipes.Prelude as PP
 
 import Data.ByteString.Substring (breakSubstringLazy)
 import Pipes.ByteString.Substring (consumeBreakSubstring,consumeDropExactLeftovers)
+import Test.DocTest (doctest)
 
 main :: IO ()
-main = defaultMain tests
+main = do
+  doctest ["src/Network/Teleshell.hs"]
+  defaultMain tests
 
 traceShowId :: a -> a
 traceShowId = id

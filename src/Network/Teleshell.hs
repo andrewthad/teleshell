@@ -37,7 +37,13 @@ runSocketPipeMaybe :: Socket -> Pipe ByteString ByteString (MaybeT IO) a -> IO (
 runSocketPipeMaybe sock p = do
   runMaybeT (runEffect (socketToProducerMaybe sock 4096 >-> p >-> socketToConsumerMaybe sock))
 
--- | The socket must already be connected.
+-- | The socket must already be connected. The upstream and downstream
+--   are provided by TCP @recv@ and @send@, respectively. More specifically,
+--
+--   * Every 'await' is replaced by 'NSB.recv'
+--   * Every 'yield' is replaced by 'NSB.sendAll'
+--
+--   This is an unusual way to use the machinery provided by @pipes@.
 runSocketPipeEither :: 
      Socket
   -> Pipe ByteString ByteString (ExceptT TeleshellError IO) a
@@ -82,6 +88,32 @@ socketToConsumerMaybe sock = for cat (\a -> lift (lift (NSB.sendAll sock a)))
 socketToConsumerEither :: Socket -> Consumer ByteString (ExceptT e IO) r
 socketToConsumerEither sock = for cat (\a -> lift (lift (NSB.sendAll sock a)))
 
+-- | A pipe intended to be composed with a 'Client' to allow it to be
+--   plugged in to 'runSocketPipeEither'. For example:
+--
+-- >>> :set -XOverloadedStrings
+-- >>> :{
+-- let myClient :: Monad m => Client' Exchange LB.ByteString m Int
+--     myClient = do
+--       sysStr <- request (Exchange (CommandLine "show system info") "XKB-9212> ")
+--       vlanStr <- request (Exchange (CommandLine "show vlan all") "XKB-9212> ")
+--       return 55
+-- :}
+--
+--   We can then connect this to a socket with an operator from @Pipes.Core@:
+--
+-- >>> let myPipe = teleshell >\\ myClient
+-- >>> :t myPipe
+-- myPipe
+--   :: Monad m =>
+--      Proxy () ByteString () ByteString (ExceptT TeleshellError m) Int
+-- 
+-- Note that this type is just the expansion of the type synonym @Pipe@. Finally,
+-- we can run this by providing an already-connected socket:
+--
+-- >>> let program = runSocketPipeEither (error "provide a socket please") myPipe
+-- >>> :t program
+-- program :: IO (Either TeleshellError Int)
 teleshell :: Monad m
   => Exchange
   -> Pipe ByteString ByteString (ExceptT TeleshellError m) LB.ByteString 
@@ -126,20 +158,22 @@ data TeleshellError
   | TeleshellErrorClosed
   deriving (Show)
 
--- data TeleshellContextError = TeleshellContextError
---   { tceCommand :: !Command
---   , tceError :: !TeleshellError
---   } deriving (Show)
-
 data Exchange = Exchange
   { exchangeCommand :: !Command
-  , commandPrompt :: !ByteString
+    -- ^ command to send to the remote host
+  , exchangePrompt :: !ByteString
+    -- ^ prompt we expect to see
   } deriving (Show)
 
 data Command
   = CommandLine ByteString
+    -- ^ A command followed by a newline. The server is expected to echo this command back.
   | CommandHidden ByteString
+    -- ^ A command followed by a newline. The server is not expected to echo the command back.
   | CommandEmpty
+    -- ^ A command consisting of nothing, not even a newline. This is useful
+    --   as an initial command because it forces consumption of any pre-command
+    --   output the server has sent to the client.
   deriving (Show)
 
 -- instance IsString Command where
