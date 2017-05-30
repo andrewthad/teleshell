@@ -1,17 +1,17 @@
-name:                teleshell
-version:             0.1.0.0
--- synopsis:
+name: teleshell
+version: 0.1.0.0
+synopsis: Telnet client and other things
 -- description:
-homepage:            https://github.com/andrewthad/teleshell#readme
-license:             BSD3
-license-file:        LICENSE
-author:              Andrew Martin
-maintainer:          andrew.thaddeus@gmail.com
-copyright:           2017 Andrew Martin
-category:            software
-build-type:          Simple
-extra-source-files:  README.md
-cabal-version:       >=1.10
+homepage: https://github.com/andrewthad/teleshell#readme
+license: BSD3
+license-file: LICENSE
+author: Andrew Martin
+maintainer: andrew.thaddeus@gmail.com
+copyright: 2017 Andrew Martin
+category: software
+build-type: Simple
+extra-source-files: README.md
+cabal-version: >=1.10
 
 library
   hs-source-dirs:      src
