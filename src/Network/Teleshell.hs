@@ -40,8 +40,8 @@ runSocketPipeMaybe sock p = do
 -- | The socket must already be connected. The upstream and downstream
 --   are provided by TCP @recv@ and @send@, respectively. More specifically,
 --
---   * Every 'await' is replaced by 'NSB.recv'
---   * Every 'yield' is replaced by 'NSB.sendAll'
+--   * Every 'await' is replaced by 'Network.Socket.ByteString.recv'
+--   * Every 'yield' is replaced by 'Network.Socket.ByteString.sendAll'
 --
 --   This is an unusual way to use the machinery provided by @pipes@.
 runSocketPipeEither :: 
@@ -49,8 +49,7 @@ runSocketPipeEither ::
   -> Pipe ByteString ByteString (ExceptT TeleshellError IO) a
   -> IO (Either TeleshellError a)
 runSocketPipeEither sock p = do
-  runExceptT (runEffect (socketToProducerEither sock 4096 >-> p >-> socketToConsumerEither sock))
-
+  runExceptT (runEffect (socketToProducerEither sock 4096 >-> p >-> socketToConsumerEither sock)) 
 socketToProducer :: Socket -> Int -> Producer ByteString IO ()
 socketToProducer sock nbytes = loop
   where
@@ -92,6 +91,7 @@ socketToConsumerEither sock = for cat (\a -> lift (lift (NSB.sendAll sock a)))
 --   plugged in to 'runSocketPipeEither'. For example:
 --
 -- >>> :set -XOverloadedStrings
+-- >>> import qualified Data.ByteString.Lazy as BL 
 -- >>> :{
 -- let myClient :: Monad m => Client' Exchange LB.ByteString m Int
 --     myClient = do
@@ -176,6 +176,5 @@ data Command
     --   output the server has sent to the client.
   deriving (Show)
 
--- instance IsString Command where
---   fromString = CommandLine . fromString
-
+instance IsString Command where
+  fromString = CommandLine . fromString
