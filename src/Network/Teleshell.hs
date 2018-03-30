@@ -8,6 +8,7 @@ module Network.Teleshell
   , teleshell
   , Exchange(..)
   , Command(..)
+  , TeleshellError(..) 
   ) where
 
 import Prelude hiding (Proxy)
