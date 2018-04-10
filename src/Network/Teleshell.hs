@@ -1,6 +1,8 @@
 {-# LANGUAGE RankNTypes #-}
 {-# LANGUAGE OverloadedStrings #-}
 
+{-# OPTIONS_GHC -Wall #-}
+
 module Network.Teleshell
   ( runSocketPipe
   , runSocketPipeMaybe
@@ -9,24 +11,37 @@ module Network.Teleshell
   , Exchange(..)
   , Command(..)
   , TeleshellError(..) 
+  , Timeout(..) 
+  , defaultTimeout 
   ) where
 
-import Prelude hiding (Proxy)
-import Pipes.Core
-import Pipes
-import Network
-import Data.ByteString (ByteString)
-import Pipes.ByteString.Substring (consumeBreakSubstringLeftovers,consumeDropExactLeftovers,consumeDropWhileLeftovers)
-import Control.Monad.Trans.Maybe
+import Control.Applicative
+import Control.Monad
 import Control.Monad.Trans.Except
-import Data.String
-import Data.Monoid
+import Control.Monad.Trans.Maybe
+import Data.ByteString (ByteString)
+import Data.Functor
 import Data.Maybe
+import Data.String
+import GHC.Conc.IO (threadWaitReadSTM)
+import Network
+import Pipes
+import Pipes.ByteString.Substring (consumeBreakSubstringLeftovers,consumeDropExactLeftovers,consumeDropWhileLeftovers)
+import qualified Control.Concurrent.STM as STM
 import qualified Data.ByteString.Lazy as LB
 import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Char8 as BC
 import qualified Network.Socket.ByteString as NSB
+import qualified Network.Socket as NS
+import qualified System.Posix.Types
+
+-- | Type wrapping an 'Int' that is interpreted
+-- as a timeout interval in microseconds.
+newtype Timeout = Timeout Int
+
+defaultTimeout :: Timeout
+defaultTimeout = Timeout 5000000
 
 -- | The socket must already be connected.
 runSocketPipe :: Socket -> Pipe ByteString ByteString IO () -> IO ()
@@ -51,6 +66,7 @@ runSocketPipeEither ::
   -> IO (Either TeleshellError a)
 runSocketPipeEither sock p = do
   runExceptT (runEffect (socketToProducerEither sock 4096 >-> p >-> socketToConsumerEither sock)) 
+
 socketToProducer :: Socket -> Int -> Producer ByteString IO ()
 socketToProducer sock nbytes = loop
   where
@@ -73,11 +89,38 @@ socketToProducerEither :: Socket -> Int -> Producer ByteString (ExceptT Teleshel
 socketToProducerEither sock nbytes = loop
   where
   loop = do
-    bs <- liftIO (NSB.recv sock nbytes)
+    bs <- lift $ ExceptT $ recvTimeout sock nbytes
     if B.null bs
-      then lift (ExceptT (return (Left TeleshellErrorClosed)))
+      then lift (ExceptT (pure (Left TeleshellErrorClosed)))
       else yield bs >> loop
 
+recvTimeout
+  :: Socket
+  -> Int
+  -> IO (Either TeleshellError ByteString)
+recvTimeout = recvTimeoutWith defaultTimeout
+
+recvTimeoutWith
+  :: Timeout
+  -> Socket
+  -> Int
+  -> IO (Either TeleshellError ByteString)
+recvTimeoutWith (Timeout t) sock nbytes = do
+  (isReadyAction,deregister) <- threadWaitReadSTM (socketToFd sock)
+  delay <- STM.registerDelay t
+  isContentReady <- STM.atomically $ (isReadyAction $> True) <|> (fini delay $> False)
+  deregister
+  if isContentReady
+    then do
+      msg <- NSB.recv sock nbytes
+      putStrLn $ BC.unpack msg
+      pure $ Right msg
+    else pure $ Left TeleshellErrorTimeout  
+  where
+    socketToFd :: NS.Socket -> System.Posix.Types.Fd
+    socketToFd (NS.MkSocket n _ _ _ _) = System.Posix.Types.Fd n
+    fini :: STM.TVar Bool -> STM.STM ()
+    fini = STM.check <=< STM.readTVar
 
 socketToConsumer :: Socket -> Consumer ByteString IO r
 socketToConsumer sock = for cat (\a -> lift (NSB.sendAll sock a))
@@ -157,6 +200,7 @@ data TeleshellError
   | TeleshellErrorLeftovers LB.ByteString ByteString ByteString Command
     -- ^ Consumed, matched prompt, remaining after matched prompt, command issued
   | TeleshellErrorClosed
+  | TeleshellErrorTimeout 
   deriving (Show)
 
 data Exchange = Exchange
