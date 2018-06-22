@@ -22,6 +22,7 @@ import Control.Monad.Trans.Maybe
 import Data.ByteString (ByteString)
 import Data.Functor
 import Data.Maybe
+import Data.Semigroup
 import Data.String
 import GHC.Conc.IO (threadWaitReadSTM)
 import Network
