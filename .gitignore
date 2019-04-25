@@ -1,29 +1,53 @@
-*.aux
+### Haskell
+dist
+dist-*
 cabal-dev
-.cabal-sandbox
-cabal.config
-cabal.sandbox.config
+*.o
+*.hi
 *.chi
 *.chs.h
-dist*
-.DS_Store
-*.dyn_hi
 *.dyn_o
-*.hi
-*.hp
-.hpc
-.ghci
-.hsenv*
-*.o
+*.dyn_hi
 *.prof
-*.sqlite3
-*.swp
+*.aux
+*.hp
+*.eventlog
 .virtualenv
+.hsenv
+.hpc
+.cabal-sandbox/
+cabal.sandbox.config
+cabal.config
+cabal.project.local
+.ghc.environment.*
+.HTF/
+# Stack
 .stack-work/
-tmp/
-**/*.dump-hi
-tags
-TAGS
-colonnade/ex1.hs
 
-reflex-dom-colonnade/result
+### IDE/support
+# Vim
+[._]*.s[a-v][a-z]
+[._]*.sw[a-p]
+[._]s[a-v][a-z]
+[._]sw[a-p]
+*~
+tags
+
+# IntellijIDEA
+.idea/
+.ideaHaskellLib/
+*.iml
+
+# Atom
+.haskell-ghc-mod.json
+
+# VS
+.vscode/
+
+# Emacs
+*#
+.dir-locals.el
+TAGS
+
+# other
+.DS_Store
