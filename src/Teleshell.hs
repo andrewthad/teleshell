@@ -35,7 +35,7 @@ import qualified Data.ByteString.Lazy as LB
 
 data TeleshellError
   = TeleshellErrorExpectedEcho !ByteString !Command
-  | TeleshellErrorLeftovers !LB.ByteString !ByteString !ByteString !Command  
+  | TeleshellErrorLeftovers !ByteString !ByteString !ByteString !Command  
   | TeleshellErrorClosed !CloseException
   | TeleshellErrorReceiveException !(ReceiveException 'Interruptible)
   | TeleshellErrorSendException !(SendException 'Uninterruptible)
@@ -132,7 +132,7 @@ runEndpoint e p = do
 
 teleshell :: Monad m
   => Exchange
-  -> Pipe ByteString ByteString (ExceptT TeleshellError m) LB.ByteString
+  -> Pipe ByteString ByteString (ExceptT TeleshellError m) ByteString
 teleshell (Exchange cmd prompt) = do
   mechoed <- case cmd of
     CommandLine c -> do
@@ -154,7 +154,7 @@ teleshell (Exchange cmd prompt) = do
 consumeBreakSubstringDropBeginning :: Monad m
   => Maybe ByteString
   -> ByteString
-  -> Consumer' ByteString m (Either (Command -> TeleshellError) LB.ByteString)
+  -> Consumer' ByteString m (Either (Command -> TeleshellError) ByteString)
 consumeBreakSubstringDropBeginning mechoed pat = do
   let echoed = fromMaybe mempty mechoed
   e <- consumeDropExactLeftovers mempty echoed
@@ -169,7 +169,7 @@ consumeBreakSubstringDropBeginning mechoed pat = do
           consumeDropWhileLeftovers leftoversTmp (== '\n')
         Nothing -> pure mempty
       (bb,promptAndLeftovers3) <- consumeBreakSubstringLeftovers leftovers2 pat
-      let lb = BB.toLazyByteString bb
+      let lb = LB.toStrict (BB.toLazyByteString bb)
           leftovers3 = B.drop (B.length pat) promptAndLeftovers3
       pure $ if B.null leftovers3
         then Right lb
