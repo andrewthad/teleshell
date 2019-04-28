@@ -10,7 +10,7 @@ source-repository-package
 source-repository-package
   type: git
   location: https://github.com/andrewthad/sockets
-  tag: 87ac6014edaaef3e2c0723ffaf64a38d612dbee9
+  tag: dc6019112b4029297484b6a41a273663f10e2db0
 source-repository-package
   type: git
   location: https://github.com/chessai/bytestring-substring

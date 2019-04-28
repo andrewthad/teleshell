@@ -40,7 +40,7 @@ data TeleshellError
   | TeleshellErrorReceiveException !(ReceiveException 'Interruptible)
   | TeleshellErrorSendException !(SendException 'Uninterruptible)
   | TeleshellErrorConnectionException !(ConnectException 'Uninterruptible)
-  deriving stock (Eq, Show)
+  deriving stock (Eq, Ord, Show)
 
 data Command
   = CommandLine !ByteString
@@ -51,7 +51,7 @@ data Command
     -- ^ A command consisting of nothing, not even a newline. This is useful
     --   as an initial command because it forces consumption of any pre-command
     --   output the server has sent to the client.
-  deriving stock (Eq, Show)
+  deriving stock (Eq, Ord, Show)
 
 -- | @'fromString' "foo"@ = @'CommandLine' ('fromString' "foo")@
 instance IsString Command where
@@ -63,7 +63,7 @@ data Exchange = Exchange
   , exchangePrompt :: !ByteString
     -- ^ prompt we expect to see
   }
-  deriving stock (Eq, Show)
+  deriving stock (Eq, Ord, Show)
 
 connectionToConsumer :: Connection -> Consumer ByteString (ExceptT TeleshellError IO) r
 connectionToConsumer c = for cat $ \b -> do
