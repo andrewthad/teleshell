@@ -118,13 +118,9 @@ runEndpoint e p = do
                Left t -> pure (Left t)
                Right a -> pure (Right a) 
          )
-         (\c -> do
-             p' <- runExceptT
-                $ runEffect
-                $ connectionToProducer c 4096 >-> p >-> connectionToConsumer c
-             case p' of
-               Left e' -> pure (Left e')
-               Right a -> pure (Right a)
+         (\c -> runExceptT
+            $ runEffect
+            $ connectionToProducer c 4096 >-> p >-> connectionToConsumer c
          )
   case w of
     Left e' -> pure (Left (TeleshellErrorConnectionException e'))
