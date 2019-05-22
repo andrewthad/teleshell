@@ -121,7 +121,7 @@ recvTimeoutWith h (Timeout t) c nbytes = do
 
 -- | Given an 'Endpoint' where a telnetd server is running
 runEndpoint :: forall a. ()
-  => Handle -- ^ Handle to which we should log send messages
+  => Handle -- ^ Handle to which we should log recv messages
   -> Endpoint
   -> Pipe ByteString ByteString (ExceptT TeleshellError IO) a
   -> IO (Either TeleshellError a)
