@@ -72,8 +72,12 @@ data Exchange = Exchange
   }
   deriving stock (Eq, Ord, Show)
 
-connectionToConsumer :: Connection -> Consumer ByteString (ExceptT TeleshellError IO) r
-connectionToConsumer c = for cat $ \b -> do
+connectionToConsumer :: ()
+  => Handle
+  -> Connection
+  -> Consumer ByteString (ExceptT TeleshellError IO) r
+connectionToConsumer h c = for cat $ \b -> do
+  liftIO $ B.hPut h (b <> "\n") 
   e <- lift . lift $ sendByteString c b
   case e of
     Left s -> lift . ExceptT . pure . Left . TeleshellErrorSendException $ s
@@ -122,10 +126,11 @@ recvTimeoutWith h (Timeout t) c nbytes = do
 -- | Given an 'Endpoint' where a telnetd server is running
 runEndpoint :: forall a. ()
   => Handle -- ^ Handle to which we should log recv messages
+  -> Handle -- ^ Handle to which we should log send messages
   -> Endpoint
   -> Pipe ByteString ByteString (ExceptT TeleshellError IO) a
   -> IO (Either TeleshellError a)
-runEndpoint hRecv e p = do
+runEndpoint hRecv hSend e p = do
   w <- withConnection e
          (\e' x -> case e' of
              Left c -> pure (Left (TeleshellErrorClosed c))
@@ -135,14 +140,15 @@ runEndpoint hRecv e p = do
          )
          (\c -> runExceptT
             $ runEffect
-            $ connectionToProducer hRecv c 4096 >-> p >-> connectionToConsumer c
+            $ connectionToProducer hRecv c 4096 >-> p >-> connectionToConsumer hSend c
          )
   case w of
     Left e' -> pure (Left (TeleshellErrorConnectionException e'))
     Right x -> pure x
 
 teleshell :: ()
-  => Handle -- ^ Handle to which we should log send messages
+  => Handle -- ^ Handle to which we should log communications
+            --   with the telnet prompt
   -> Exchange
   -> Pipe ByteString ByteString (ExceptT TeleshellError IO) ByteString
 teleshell h (Exchange cmd prompt) = do
