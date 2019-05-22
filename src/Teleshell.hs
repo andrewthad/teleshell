@@ -3,6 +3,7 @@
 {-# language GADTs #-}
 {-# language KindSignatures #-}
 {-# language LambdaCase #-}
+{-# language OverloadedStrings #-}
 {-# language RankNTypes #-}
 {-# language ScopedTypeVariables #-}
 {-# language StandaloneDeriving #-}
@@ -32,6 +33,7 @@ import qualified Data.ByteString as B
 import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Char8 as BC8
 import qualified Data.ByteString.Lazy as LB
+import System.IO (Handle)
 
 -- | The type of errors we can encounter when interacting with a telnet
 --   server.
@@ -77,11 +79,15 @@ connectionToConsumer c = for cat $ \b -> do
     Left s -> lift . ExceptT . pure . Left . TeleshellErrorSendException $ s
     Right () -> pure ()
 
-connectionToProducer :: Connection -> Int -> Producer ByteString (ExceptT TeleshellError IO) r
-connectionToProducer c nbytes = loop
+connectionToProducer :: ()
+  => Handle -- ^ handle to which we log recv messages
+  -> Connection
+  -> Int
+  -> Producer ByteString (ExceptT TeleshellError IO) r
+connectionToProducer h c nbytes = loop
   where
     loop = do
-      ebs <- liftIO $ recvTimeout c nbytes
+      ebs <- liftIO $ recvTimeout h c nbytes
       case ebs of
         Left r -> lift . ExceptT . pure . Left $ r
         Right b -> yield b >> loop
@@ -93,28 +99,33 @@ defaultTimeout :: Timeout
 defaultTimeout = Timeout 5000000
 
 recvTimeout :: ()
-  => Connection -- ^ connection
-  -> Int -- ^ number of bytes
-  -> IO (Either TeleshellError ByteString)
-recvTimeout = recvTimeoutWith defaultTimeout
-
-recvTimeoutWith :: ()
-  => Timeout -- ^ timeout
+  => Handle -- ^ handle to which recv messages will be logged
   -> Connection -- ^ connection
   -> Int -- ^ number of bytes
   -> IO (Either TeleshellError ByteString)
-recvTimeoutWith (Timeout t) c nbytes = do
+recvTimeout h = recvTimeoutWith h defaultTimeout
+
+recvTimeoutWith :: ()
+  => Handle -- ^ handle to which recv messages will be logged
+  -> Timeout -- ^ timeout
+  -> Connection -- ^ connection
+  -> Int -- ^ number of bytes
+  -> IO (Either TeleshellError ByteString)
+recvTimeoutWith h (Timeout t) c nbytes = do
   delay <- registerDelay t
   interruptibleReceiveBoundedByteStringSlice delay c nbytes 0 >>= \case
     Left r -> pure (Left (TeleshellErrorReceiveException r))
-    Right b -> pure (Right b)
+    Right b -> do
+      B.hPut h (b <> "\n")
+      pure (Right b)
 
 -- | Given an 'Endpoint' where a telnetd server is running
 runEndpoint :: forall a. ()
-  => Endpoint
+  => Handle -- ^ Handle to which we should log send messages
+  -> Endpoint
   -> Pipe ByteString ByteString (ExceptT TeleshellError IO) a
   -> IO (Either TeleshellError a)
-runEndpoint e p = do
+runEndpoint hRecv e p = do
   w <- withConnection e
          (\e' x -> case e' of
              Left c -> pure (Left (TeleshellErrorClosed c))
@@ -124,24 +135,27 @@ runEndpoint e p = do
          )
          (\c -> runExceptT
             $ runEffect
-            $ connectionToProducer c 4096 >-> p >-> connectionToConsumer c
+            $ connectionToProducer hRecv c 4096 >-> p >-> connectionToConsumer c
          )
   case w of
     Left e' -> pure (Left (TeleshellErrorConnectionException e'))
     Right x -> pure x
 
-teleshell :: Monad m
-  => Exchange
-  -> Pipe ByteString ByteString (ExceptT TeleshellError m) ByteString
-teleshell (Exchange cmd prompt) = do
+teleshell :: ()
+  => Handle -- ^ Handle to which we should log send messages
+  -> Exchange
+  -> Pipe ByteString ByteString (ExceptT TeleshellError IO) ByteString
+teleshell h (Exchange cmd prompt) = do
   mechoed <- case cmd of
     CommandLine c -> do
-      yield c
-      yield (BC8.singleton '\n')
+      let msg = c <> "\n"
+      liftIO $ B.hPut h msg
+      yield msg
       pure (Just c)
     CommandHidden c -> do
-      yield c
-      yield (BC8.singleton '\n')
+      let msg = c <> "\n"
+      liftIO $ B.hPut h msg
+      yield msg 
       pure (Just mempty)
     CommandEmpty -> do
       pure Nothing
