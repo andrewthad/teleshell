@@ -14,25 +14,27 @@ module Teleshell
   , TeleshellError(..)
   , Timeout(..)
   
-    -- * 
+    -- * Functions
   , defaultTimeout
   , runEndpoint
   , teleshell  
   ) where
 
-import Pipes.ByteString.Substring (consumeDropExactLeftovers,consumeDropWhileLeftovers,consumeBreakSubstringLeftovers)
+import Control.Concurrent.STM.TVar
 import Control.Monad.Trans.Except
 import Data.ByteString (ByteString)
+import Data.Maybe (fromMaybe)
 import Data.String (IsString(fromString))
 import Pipes
-import Data.Maybe (fromMaybe)
+import Pipes.ByteString.Substring (consumeDropExactLeftovers,consumeDropWhileLeftovers,consumeBreakSubstringLeftovers)
 import Socket.Stream.IPv4
-import Control.Concurrent.STM.TVar
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Char8 as BC8
 import qualified Data.ByteString.Lazy as LB
 
+-- | The type of errors we can encounter when interacting with a telnet
+--   server.
 data TeleshellError
   = TeleshellErrorExpectedEcho !ByteString !Command
   | TeleshellErrorLeftovers !ByteString !ByteString !ByteString !Command  
@@ -42,6 +44,7 @@ data TeleshellError
   | TeleshellErrorConnectionException !(ConnectException 'Uninterruptible)
   deriving stock (Eq, Ord, Show)
 
+-- | A command to be sent to a telnet server.
 data Command
   = CommandLine !ByteString
     -- ^ A command followed by a newline. The server is expected to echo this command back.
@@ -57,6 +60,8 @@ data Command
 instance IsString Command where
   fromString = CommandLine . fromString
 
+-- | An exchange is a command and the response we expect to see
+--   as a result of that command.
 data Exchange = Exchange
   { exchangeCommand :: !Command
     -- ^ command to send to the remote host
@@ -79,9 +84,7 @@ connectionToProducer c nbytes = loop
       ebs <- liftIO $ recvTimeout c nbytes
       case ebs of
         Left r -> lift . ExceptT . pure . Left $ r
-        Right b -> if B.null b
-          then lift . ExceptT . pure . Left $ TeleshellErrorClosed ClosePeerContinuedSending
-          else yield b >> loop
+        Right b -> yield b >> loop
 
 -- | A timeout in microseconds.
 newtype Timeout = Timeout { getTimeout :: Int }
@@ -106,6 +109,7 @@ recvTimeoutWith (Timeout t) c nbytes = do
     Left r -> pure (Left (TeleshellErrorReceiveException r))
     Right b -> pure (Right b)
 
+-- | Given an 'Endpoint' where a telnetd server is running
 runEndpoint :: forall a. ()
   => Endpoint
   -> Pipe ByteString ByteString (ExceptT TeleshellError IO) a
@@ -142,10 +146,9 @@ teleshell (Exchange cmd prompt) = do
     CommandEmpty -> do
       pure Nothing
   e <- consumeBreakSubstringDropBeginning mechoed prompt
-  lb <- case e of
+  case e of
     Left err -> lift . ExceptT . pure . Left $ err cmd
     Right lb -> pure lb
-  pure lb
 
 consumeBreakSubstringDropBeginning :: Monad m
   => Maybe ByteString
