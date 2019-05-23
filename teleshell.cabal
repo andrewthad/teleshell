@@ -36,7 +36,7 @@ library
     , bytestring >= 0.10 && < 0.11
     , bytestring-substring >= 0.1 && < 0.2
     , pipes >= 4.3 && < 4.4
-    , sockets >= 0.3 && < 0.4
+    , sockets >= 0.4 && < 0.5
     , stm >= 2.4 && < 2.6
     , transformers >= 0.5 && < 0.6
   hs-source-dirs:

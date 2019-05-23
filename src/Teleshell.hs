@@ -28,12 +28,17 @@ import Data.Maybe (fromMaybe)
 import Data.String (IsString(fromString))
 import Pipes
 import Pipes.ByteString.Substring (consumeDropExactLeftovers,consumeDropWhileLeftovers,consumeBreakSubstringLeftovers)
-import Socket.Stream.IPv4
+import Socket.Stream.IPv4 (CloseException,ReceiveException,ConnectException)
+import Socket.Stream.IPv4 (Peer,Connection,Interruptibility(..),SendException)
+import System.IO (Handle,hFlush)
+
+import qualified Socket.Stream.IPv4 as S
+import qualified Socket.Stream.Uninterruptible.ByteString as SU
+import qualified Socket.Stream.Interruptible.ByteString as SI
 import qualified Data.ByteString as B
 import qualified Data.ByteString.Builder as BB
 import qualified Data.ByteString.Char8 as BC8
 import qualified Data.ByteString.Lazy as LB
-import System.IO (Handle)
 
 -- | The type of errors we can encounter when interacting with a telnet
 --   server.
@@ -77,8 +82,10 @@ connectionToConsumer :: ()
   -> Connection
   -> Consumer ByteString (ExceptT TeleshellError IO) r
 connectionToConsumer h c = for cat $ \b -> do
-  liftIO $ B.hPut h (b <> "\n") 
-  e <- lift . lift $ sendByteString c b
+  liftIO $ do
+    B.hPut h b
+    hFlush h
+  e <- lift . lift $ SU.send c b
   case e of
     Left s -> lift . ExceptT . pure . Left . TeleshellErrorSendException $ s
     Right () -> pure ()
@@ -117,21 +124,22 @@ recvTimeoutWith :: ()
   -> IO (Either TeleshellError ByteString)
 recvTimeoutWith h (Timeout t) c nbytes = do
   delay <- registerDelay t
-  interruptibleReceiveBoundedByteStringSlice delay c nbytes 0 >>= \case
+  SI.receiveOnce delay c nbytes >>= \case
     Left r -> pure (Left (TeleshellErrorReceiveException r))
     Right b -> do
-      B.hPut h (b <> "\n")
+      B.hPut h b
+      hFlush h
       pure (Right b)
 
--- | Given an 'Endpoint' where a telnetd server is running
+-- | Given a 'Peer' where a telnetd server is running
 runEndpoint :: forall a. ()
   => Handle -- ^ Handle to which we should log recv messages
   -> Handle -- ^ Handle to which we should log send messages
-  -> Endpoint
+  -> Peer
   -> Pipe ByteString ByteString (ExceptT TeleshellError IO) a
   -> IO (Either TeleshellError a)
 runEndpoint hRecv hSend e p = do
-  w <- withConnection e
+  w <- S.withConnection e
          (\e' x -> case e' of
              Left c -> pure (Left (TeleshellErrorClosed c))
              Right () -> case x of
@@ -155,12 +163,10 @@ teleshell h (Exchange cmd prompt) = do
   mechoed <- case cmd of
     CommandLine c -> do
       let msg = c <> "\n"
-      liftIO $ B.hPut h msg
       yield msg
       pure (Just c)
     CommandHidden c -> do
       let msg = c <> "\n"
-      liftIO $ B.hPut h msg
       yield msg 
       pure (Just mempty)
     CommandEmpty -> do
