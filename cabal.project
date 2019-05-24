@@ -2,7 +2,7 @@ packages: .
 source-repository-package
   type: git
   location: https://github.com/andrewthad/posix-api
-  tag: 7033b2ac7bbd0fb58bc5339ef5ff57382b154a8e
+  tag: 7a65caa9aa350b6c4eeff471c540e4be2c51b4bf
 source-repository-package
   type: git
   location: https://github.com/andrewthad/primitive-atomic
@@ -10,8 +10,8 @@ source-repository-package
 source-repository-package
   type: git
   location: https://github.com/andrewthad/sockets
-  tag: 50fb55f296a732e807b3a7f72777246610c178da
+  tag: 1437c135046cff05d5e5e65151a7e0f1473e5ca0
 source-repository-package
   type: git
-  location: https://github.com/chessai/bytestring-substring
-  tag: fb02019ad0bd5ef18fa7bbe55e5044420abeabf6
+  location: https://github.com/andrewthad/bytestring-substring
+  tag: c6c2e3855b3876cfaadc4fd4e0139be2c2ea035b

@@ -28,6 +28,7 @@ import Data.Maybe (fromMaybe)
 import Data.String (IsString(fromString))
 import Pipes
 import Pipes.ByteString.Substring (consumeDropExactLeftovers,consumeDropWhileLeftovers,consumeBreakSubstringLeftovers)
+import Socket.Stream.IPv4 (Family(Internet),Version(V4))
 import Socket.Stream.IPv4 (CloseException,ReceiveException,ConnectException)
 import Socket.Stream.IPv4 (Peer,Connection,Interruptibility(..),SendException)
 import System.IO (Handle,hFlush)
@@ -48,7 +49,7 @@ data TeleshellError
   | TeleshellErrorClosed !CloseException
   | TeleshellErrorReceiveException !(ReceiveException 'Interruptible)
   | TeleshellErrorSendException !(SendException 'Uninterruptible)
-  | TeleshellErrorConnectionException !(ConnectException 'Uninterruptible)
+  | TeleshellErrorConnectionException !(ConnectException ('Internet 'V4) 'Uninterruptible)
   deriving stock (Eq, Ord, Show)
 
 -- | A command to be sent to a telnet server.
