@@ -81,9 +81,7 @@ connectionToConsumer :: ()
   -> Connection
   -> Consumer ByteString (ExceptT TeleshellError IO) r
 connectionToConsumer h c = for cat $ \b -> do
-  liftIO $ do
-    B.hPut h b
-    hFlush h
+  liftIO $ hPut h b
   e <- lift . lift $ SU.send c b
   case e of
     Left s -> lift . ExceptT . pure . Left . TeleshellErrorSendException $ s
@@ -117,8 +115,7 @@ recvTimeout h (Timeout t) c nbytes = do
   SI.receiveOnce delay c nbytes >>= \case
     Left r -> pure (Left (TeleshellErrorReceiveException r))
     Right b -> do
-      B.hPut h b
-      hFlush h
+      hPut h b
       pure (Right b)
 
 -- | Connect to a 'Peer' where a telnetd server is running.
@@ -190,3 +187,10 @@ consumeBreakSubstringDropBeginning mechoed pat = do
       pure $ if B.null leftovers3
         then Right lb
         else Left (TeleshellErrorLeftovers lb pat leftovers3)
+
+-- Make sure to flush after each hPut, to guarantee sending of messages
+-- to the handle
+hPut :: Handle -> ByteString -> IO ()
+hPut h b = do
+  B.hPut h b
+  hFlush h
