@@ -14,11 +14,10 @@ module Teleshell
   , Exchange(..)
   , TeleshellError(..)
   , Timeout(..)
-  
+
     -- * Functions
-  , defaultTimeout
   , runEndpoint
-  , teleshell  
+  , teleshell
   ) where
 
 import Control.Concurrent.STM.TVar
@@ -44,7 +43,7 @@ import qualified Data.ByteString.Lazy as LB
 --   server.
 data TeleshellError
   = TeleshellErrorExpectedEcho !ByteString !Command
-  | TeleshellErrorLeftovers !ByteString !ByteString !ByteString !Command  
+  | TeleshellErrorLeftovers !ByteString !ByteString !ByteString !Command
   | TeleshellErrorClosed !CloseException
   | TeleshellErrorReceiveException !(ReceiveException 'Interruptible)
   | TeleshellErrorSendException !(SendException 'Uninterruptible)
@@ -92,13 +91,14 @@ connectionToConsumer h c = for cat $ \b -> do
 
 connectionToProducer :: ()
   => Handle -- ^ handle to which we log recv messages
+  -> Timeout -- ^ number of microseconds after which we should timeout
   -> Connection
   -> Int
   -> Producer ByteString (ExceptT TeleshellError IO) r
-connectionToProducer h c nbytes = loop
+connectionToProducer h t c nbytes = loop
   where
     loop = do
-      ebs <- liftIO $ recvTimeout h c nbytes
+      ebs <- liftIO $ recvTimeout h t c nbytes
       case ebs of
         Left r -> lift . ExceptT . pure . Left $ r
         Right b -> yield b >> loop
@@ -106,23 +106,13 @@ connectionToProducer h c nbytes = loop
 -- | A timeout in microseconds.
 newtype Timeout = Timeout { getTimeout :: Int }
 
-defaultTimeout :: Timeout
-defaultTimeout = Timeout 5000000
-
 recvTimeout :: ()
-  => Handle -- ^ handle to which recv messages will be logged
-  -> Connection -- ^ connection
-  -> Int -- ^ number of bytes
-  -> IO (Either TeleshellError ByteString)
-recvTimeout h = recvTimeoutWith h defaultTimeout
-
-recvTimeoutWith :: ()
   => Handle -- ^ handle to which recv messages will be logged
   -> Timeout -- ^ timeout
   -> Connection -- ^ connection
   -> Int -- ^ number of bytes
   -> IO (Either TeleshellError ByteString)
-recvTimeoutWith h (Timeout t) c nbytes = do
+recvTimeout h (Timeout t) c nbytes = do
   delay <- registerDelay t
   SI.receiveOnce delay c nbytes >>= \case
     Left r -> pure (Left (TeleshellErrorReceiveException r))
@@ -131,24 +121,25 @@ recvTimeoutWith h (Timeout t) c nbytes = do
       hFlush h
       pure (Right b)
 
--- | Given a 'Peer' where a telnetd server is running
+-- | Connect to a 'Peer' where a telnetd server is running.
 runEndpoint :: forall a. ()
   => Handle -- ^ Handle to which we should log recv messages
   -> Handle -- ^ Handle to which we should log send messages
+  -> Timeout
   -> Peer
   -> Pipe ByteString ByteString (ExceptT TeleshellError IO) a
   -> IO (Either TeleshellError a)
-runEndpoint hRecv hSend e p = do
+runEndpoint hRecv hSend t e p = do
   w <- S.withConnection e
          (\e' x -> case e' of
              Left c -> pure (Left (TeleshellErrorClosed c))
              Right () -> case x of
                Left t -> pure (Left t)
-               Right a -> pure (Right a) 
+               Right a -> pure (Right a)
          )
          (\c -> runExceptT
             $ runEffect
-            $ connectionToProducer hRecv c 4096 >-> p >-> connectionToConsumer hSend c
+            $ connectionToProducer hRecv t c 4096 >-> p >-> connectionToConsumer hSend c
          )
   case w of
     Left e' -> pure (Left (TeleshellErrorConnectionException e'))
@@ -167,7 +158,7 @@ teleshell h (Exchange cmd prompt) = do
       pure (Just c)
     CommandHidden c -> do
       let msg = c <> "\n"
-      yield msg 
+      yield msg
       pure (Just mempty)
     CommandEmpty -> do
       pure Nothing
