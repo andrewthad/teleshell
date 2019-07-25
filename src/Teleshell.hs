@@ -144,11 +144,9 @@ runEndpoint hRecv hSend t e p = do
     Right x -> pure x
 
 teleshell :: ()
-  => Handle -- ^ Handle to which we should log communications
-            --   with the telnet prompt
-  -> Exchange
+  => Exchange
   -> Pipe ByteString ByteString (ExceptT TeleshellError IO) ByteString
-teleshell h (Exchange cmd prompt) = do
+teleshell (Exchange cmd prompt) = do
   mechoed <- case cmd of
     CommandLine c -> do
       let msg = c <> "\n"
